@@ -34,7 +34,7 @@ class Platform {
   async _extractOutput(type, nodeSet) {
     const output = [];
     await asyncUtils.forEach(nodeSet, async (node, index) => {
-      const ipAddress = await this.tf.nodeOutput(type, index, 'ip_address');
+      const ipAddress = await this.tf.nodeOutput(type, index, 'ip_address', node.cname);
       output.push(JSON.parse(ipAddress.toString()));
     });
     return output;

@@ -16,8 +16,12 @@ module.exports = {
       process.exit(-1);
     }
 
-    const validatorPublicKey = publicKeyFromPrivateKeyPath(validatorSshPrivateKeyPath);
-    const publicNodePublicKey = publicKeyFromPrivateKeyPath(publicNodeSshPrivateKeyPath);
+    const validatorPublicKey = validatorSshPrivateKeyPath.endsWith('.pub')
+      ? fs.readFileSync(validatorSshPrivateKeyPath).toString().trim()
+      : publicKeyFromPrivateKeyPath(validatorSshPrivateKeyPath);
+    const publicNodePublicKey = publicNodeSshPrivateKeyPath.endsWith('.pub')
+      ? fs.readFileSync(publicNodeSshPrivateKeyPath).toString().trim()
+      : publicKeyFromPrivateKeyPath(publicNodeSshPrivateKeyPath);
 
     return {validatorPublicKey, publicNodePublicKey};
   }

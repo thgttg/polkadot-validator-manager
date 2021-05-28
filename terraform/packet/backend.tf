@@ -1,9 +1,14 @@
-provider "google" {
-  project     = var.state_project
-  version     = "~>2.15"
+provider "aws" {
+  profile = "thgttg"
+  region = "us-east-1"
 }
 
 terraform {
-  backend "gcs" {
+  required_providers {
+    aws = {
+      source = "hashicorp/aws"
+      version = "~> 3.42"
+    }
   }
+  backend "s3" {}
 }

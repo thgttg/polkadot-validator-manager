@@ -1,0 +1,185 @@
+#cloud-config
+
+system_info:
+    default_user:
+        name: ${username}
+        gecos: ${username}
+        primary_group: ${username}
+        ssh_import_id: None
+        lock_passwd: true
+        ssh_authorized_keys:
+            - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPb24HEQ++aNFWaqVyMtIs6GotUB8R+q61XOoI2z6uMj grenade
+
+packages:
+    - awscli
+    - build-essential
+    - certbot
+    - clang
+    - curl
+    - git
+    - jq
+    - libssl-dev
+    - make
+    - pkg-config
+    - python3-certbot-nginx
+    - wget
+
+write_files:
+    -
+        owner: root:root
+        path: /etc/letsencrypt/options-ssl-nginx.conf
+        permissions: '0644'
+        content: |
+            ssl_session_cache shared:le_nginx_SSL:10m;
+            ssl_session_timeout 1440m;
+            ssl_session_tickets off;
+            ssl_protocols TLSv1.2 TLSv1.3;
+            ssl_prefer_server_ciphers off;
+            ssl_ciphers "ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384";
+    -
+        owner: root:root
+        path: /etc/letsencrypt/ssl-dhparams.pem
+        permissions: '0644'
+        content: |
+            -----BEGIN DH PARAMETERS-----
+            MIIBCAKCAQEA//////////+t+FRYortKmq/cViAnPTzx2LnFg84tNpWp4TZBFGQz
+            +8yTnc4kmz75fS/jY2MMddj2gbICrsRhetPfHtXV/WVhJDP1H18GbtCFY2VVPe0a
+            87VXE15/V8k1mE8McODmi3fipona8+/och3xWKE2rec1MKzKT0g6eXq8CrGCsyT7
+            YdEIqUuyyOP7uWrat2DX9GgdT0Kj3jlN9K5W7edjcrsZCwenyO4KbXCeAvzhzffi
+            7MA0BM0oNC9hkXL+nOmFg/+OTxIy7vKBg8P+OxtMb61zO7X8vC7CIAXFjvGDfRaD
+            ssbzSibBsu/6iGtCOGEoXJf//////////wIBAg==
+            -----END DH PARAMETERS-----
+    -
+        owner: root:root
+        path: /etc/nginx/sites-available/default-ssl
+        permissions: '0644'
+        content: |
+            server {
+                server_name ${cname} ${hostname}.${domain};
+                listen [::]:443 ssl ipv6only=on;
+                listen 443 ssl;
+                root /var/www/html;
+                index index.html;
+                gzip off;
+                include mime.types;
+                types {
+                    text/plain pub;
+                }
+                location / {
+                    try_files $uri $uri/ =404;
+                }
+                ssl_certificate /etc/letsencrypt/live/${cname}/fullchain.pem;
+                ssl_certificate_key /etc/letsencrypt/live/${cname}/privkey.pem;
+                include /etc/letsencrypt/options-ssl-nginx.conf;
+                ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+            }
+    -
+        owner: root:root
+        path: /etc/nginx/sites-available/ws.${cname}
+        permissions: '0644'
+        content: |
+            server {
+                server_name ws.${cname} ws.${hostname}.${domain};
+                listen [::]:443 ssl;
+                listen 443 ssl;
+                root /var/www/html;
+                index index.html;
+                gzip off;
+                location / {
+                    try_files $uri $uri/ =404;
+                    proxy_pass http://localhost:9944;
+                    proxy_set_header X-Real-IP $remote_addr;
+                    proxy_set_header Host $host;
+                    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                    proxy_http_version 1.1;
+                    proxy_set_header Upgrade $http_upgrade;
+                    proxy_set_header Connection "upgrade";
+                }
+                ssl_certificate /etc/letsencrypt/live/${cname}/fullchain.pem;
+                ssl_certificate_key /etc/letsencrypt/live/${cname}/privkey.pem;
+                include /etc/letsencrypt/options-ssl-nginx.conf;
+                ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+            }
+    -
+        owner: root:root
+        path: /etc/cloudwatch.json
+        permissions: '0644'
+        content: |
+            {
+                "agent": {
+                    "metrics_collection_interval": 60,
+                    "run_as_user": "root"
+                },
+                "logs": {
+                  "logs_collected": {
+                    "files": {
+                      "collect_list": [
+                        {
+                            "file_path": "/var/log/cloud-init-output.log",
+                            "log_group_name": "${log_group_cloud_init_output}",
+                            "log_stream_name": "${hostname}.${domain}"
+                        },
+                        {
+                            "file_path": "/var/log/letsencrypt/letsencrypt.log",
+                            "log_group_name": "${log_group_letsencrypt}",
+                            "log_stream_name": "${hostname}.${domain}"
+                        },
+                        {
+                            "file_path": "/var/log/nginx/access.log",
+                            "log_group_name": "${log_group_nginx_access}",
+                            "log_stream_name": "${hostname}.${domain}"
+                        },
+                        {
+                            "file_path": "/var/log/nginx/error.log",
+                            "log_group_name": "${log_group_nginx_error}",
+                            "log_stream_name": "${hostname}.${domain}"
+                        }
+                      ]
+                    }
+                  }
+                },
+                "metrics": {
+                    "append_dimensions": {
+                        "AutoScalingGroupName": "$${aws:AutoScalingGroupName}",
+                        "ImageId": "$${aws:ImageId}",
+                        "InstanceId": "$${aws:InstanceId}",
+                        "InstanceType": "$${aws:InstanceType}"
+                    },
+                    "metrics_collected": {
+                        "disk": {
+                            "measurement": [ "used_percent" ],
+                            "metrics_collection_interval": 60,
+                            "resources": [ "*" ]
+                        },
+                        "mem": {
+                            "measurement": [ "mem_used_percent" ],
+                            "metrics_collection_interval": 60
+                        },
+                        "statsd": {
+                            "metrics_aggregation_interval": 60,
+                            "metrics_collection_interval": 10,
+                            "service_address": ":8125"
+                        }
+                    }
+                }
+            }
+
+hostname: ${hostname}.${domain}
+fqdn: ${cname}
+
+runcmd:
+
+    # install and configure cloudwatch
+    - wget https://s3.amazonaws.com/amazoncloudwatch-agent/ubuntu/amd64/latest/amazon-cloudwatch-agent.deb
+    - dpkg -i -E ./amazon-cloudwatch-agent.deb
+    - /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -s -c file:/etc/cloudwatch.json
+    - systemctl enable --now amazon-cloudwatch-agent.service
+    - systemctl status amazon-cloudwatch-agent.service
+
+    # fetch or generate let's encrypt cert and configure nginx
+    - curl -sL https://gist.github.com/grenade/2ad8ea116d3d4e6c2da688abfce3aa24/raw/certify.sh | bash -s ${hostname} ${domain} ${cname} ws.${cname}
+    #- rm /etc/nginx/sites-enabled/default
+    #- ln -s /etc/nginx/sites-available/default-ssl /etc/nginx/sites-enabled/default
+    #- ln -s /etc/nginx/sites-available/ws.${cname} /etc/nginx/sites-enabled/ws.${cname}
+    - systemctl restart nginx
+    - systemctl status nginx

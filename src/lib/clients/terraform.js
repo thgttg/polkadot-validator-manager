@@ -56,6 +56,7 @@ class Terraform {
   }
 
   async clean() {
+    console.log(`clean()`);
     this._initializeTerraform();
     let validatorCleanPromises = [];
     try {
@@ -77,32 +78,54 @@ class Terraform {
     return Promise.all(cleanPromises);
   }
 
-  nodeOutput(type, counter, outputField) {
+  nodeOutput(type, counter, outputField, cname = undefined) {
+    console.log(`nodeOutput(type = ${type}, counter = ${counter}, outputField = ${outputField})`);
     const cwd = this._terraformNodeDirPath(type, counter);
     const options = { cwd };
-
-    return this._cmd(`output -json ${outputField}`, options);
+    //return this._cmd(`output -json ${outputField}`, options);
+    return this._cmd([
+        `-chdir=${cwd}`,
+        'output',
+        '-json',
+        outputField,
+      ].join(' '), options);
   }
 
   async _create(type, sshKey, nodes, method='apply') {
+    console.log(`_create(type = ${type}, sshKey = ${sshKey}, nodes.length = ${nodes.length}, method = ${method})`);
     const createPromises = [];
 
-    for (let counter = 0; counter < nodes.length; counter++) {
-      const cwd = this._terraformNodeDirPath(type, counter);
-      const backendConfig = this._backendConfig(type, counter);
-      const nodeName = this._nodeName(type, counter);
+    for (let i = 0; i < nodes.length; i++) {
+      const cwd = this._terraformNodeDirPath(type, i);
+      const nodeName = nodes[i].cname
+        ? nodes[i].cname.split('.').join('-')
+        : this._nodeName(type, i);
       createPromises.push(new Promise(async (resolve) => {
         const options = { cwd };
-        await this._initCmd(backendConfig,options);
-        this._createVarsFile(cwd, nodes[counter], sshKey, nodeName);
+        await this._initCmd(options, `tfstate/${nodes[i].cname}`);
+        this._createVarsFile(cwd, nodes[i], sshKey, nodeName);
 
-        let cmd = method;
-        if (method === 'apply'){
-          cmd += ' -auto-approve';
-        }
-
+        let cmd = (method === 'apply')
+          ? [
+              method,
+              `-var=hostname=${nodes[i].hostname}`,
+              `-var=domain=${nodes[i].domain}`,
+              `-var=cname=${nodes[i].cname}`,
+              `-var=image=${nodes[i].image}`,
+              `-var=location=${nodes[i].location}`,
+              `-var=machine_type=${nodes[i].machineType}`,
+              `-var=terraform_state_location=${this.config.state.location}`,
+              `-var=terraform_state_profile=${this.config.state.profile}`,
+              /*
+              `-var=terraform_state_key=tfstate/${nodes[i].cname}`,
+              `-var=terraform_state_bucket=${this.config.state.bucket}`,
+              `-var=terraform_state_table=${this.config.state.table}`,
+              */
+              '-auto-approve',
+              '-lock=false'
+            ].join(' ')
+          : method;
         await this._cmd(cmd, options);
-
         resolve(true);
       }));
     }
@@ -110,14 +133,14 @@ class Terraform {
   }
 
   async _destroy(type, nodes) {
+    console.log(`_destroy(type = ${type}, nodes.length = ${nodes.length})`);
     const destroyPromises = [];
 
-    for (let counter = 0; counter < nodes.length; counter++) {
-      const cwd = this._terraformNodeDirPath(type, counter)
-      const backendConfig = this._backendConfig(type, counter);
+    for (let i = 0; i < nodes.length; i++) {
+      const cwd = this._terraformNodeDirPath(type, i)
       destroyPromises.push(new Promise(async (resolve) => {
         const options = { cwd };
-        await this._initCmd(backendConfig,options);
+        await this._initCmd(options, `tfstate/${nodes[i].cname}`);
         await this._cmd('destroy -lock=false -auto-approve', options);
 
         resolve(true);
@@ -127,34 +150,71 @@ class Terraform {
   }
 
   async _cmd(command, options = {}) {
+    console.log(`_cmd(command = ${command}, options = ${options})`);
     const actualOptions = Object.assign({}, this.options, options);
     return cmd.exec(`terraform ${command}`, actualOptions);
   }
 
-  async _initCmd(backendConfig, options) {
-    await this._cmd(`init -var state_project=${this.config.state.project} -backend-config=bucket=${backendConfig.bucket} -backend-config=prefix=${backendConfig.prefix}`, options);
+  async _initCmd(options, stateKey = undefined) {
+    console.log(`_initCmd(options = ${options}, stateKey = ${stateKey})`);
+    await this._cmd([
+        'init',
+        `-var=terraform_state_bucket=${this.config.state.bucket}`,
+        `-var=terraform_state_location=${this.config.state.location}`,
+        `-var=terraform_state_profile=${this.config.state.profile}`,
+        `-var=terraform_state_table=${this.config.state.table}`,
+        `-backend-config="bucket=${this.config.state.bucket}"`,
+        `-backend-config="key=${stateKey ?? this.config.state.key}"`,
+        `-backend-config="region=${this.config.state.location}"`,
+        `-backend-config="profile=${this.config.state.profile}"`,
+        `-backend-config="encrypt=${this.config.state.encrypt}"`,
+        `-backend-config="dynamodb_table=${this.config.state.table}"`
+      ].join(' '), options);
   }
 
   async _initState(){
+    console.log(`_initState()`)
     const cwd = this._terraformNodeDirPath('remote-state');
     const options = { cwd };
-
-    await this._cmd(`init -var state_project=${this.config.state.project}`, options);
-    const bucketName = this._bucketName()
-    return this._cmd(`apply -var state_project=${this.config.state.project} -var name=${bucketName} -auto-approve`, options);
+    await this._cmd([
+        'init',
+        `-var=terraform_state_bucket=${this.config.state.bucket}`,
+        `-var=terraform_state_location=${this.config.state.location}`,
+        `-var=terraform_state_profile=${this.config.state.profile}`,
+        `-var=terraform_state_table=${this.config.state.table}`,
+        `-backend-config="bucket=${this.config.state.bucket}"`,
+        `-backend-config="key=${this.config.state.key}"`,
+        `-backend-config="region=${this.config.state.location}"`,
+        `-backend-config="profile=${this.config.state.profile}"`,
+        `-backend-config="encrypt=${this.config.state.encrypt}"`,
+        `-backend-config="dynamodb_table=${this.config.state.table}"`
+      ].join(' '), options);
+    return this._cmd([
+        'apply',
+        `-var=terraform_state_bucket=${this.config.state.bucket}`,
+        `-var=terraform_state_location=${this.config.state.location}`,
+        `-var=terraform_state_profile=${this.config.state.profile}`,
+        `-var=terraform_state_table=${this.config.state.table}`,
+        '-auto-approve'
+      ].join(' '), options);
   }
 
-  _createVarsFile(cwd, node, sshKey, nodeName) {
+  _createVarsFile(cwd, node, sshKey) {
+    console.log(`_createVarsFile(cwd = ${cwd}, node = ${node}, sshKey = ${sshKey})`);
     const data = {
-      stateProject: this.config.state.project,
+      terraform_state_bucket: this.config.state.bucket,
+      terraform_state_location: this.config.state.location,
+      terraform_state_profile: this.config.state.profile,
+      terraform_state_table: this.config.state.table,
       publicKey: sshKey,
       sshUser: node.sshUser,
       machineType: node.machineType,
       location: node.location,
       zone: node.zone,
       projectId: node.projectId,
-      nodeCount: node.count,
-      name: nodeName
+      hostname: node.hostname,
+      domain: node.domain,
+      cname: node.cname
     }
 
     if(node.image) {
@@ -168,39 +228,53 @@ class Terraform {
   }
 
   _initializeTerraform() {
+    console.log('_initializeTerraform()')
     fs.removeSync(this.terraformFilesPath);
     fs.ensureDirSync(this.terraformFilesPath);
 
     this._copyTerraformFiles('remote-state', 0, 'remote-state');
     for (let counter = 0; counter < this.config.validators.nodes.length; counter++) {
-      this._copyTerraformFiles('validator', counter, this.config.validators.nodes[counter].provider);
+      this._copyTerraformFiles(
+        'validator',
+        counter,
+        this.config.validators.nodes[counter].provider,
+        this.config.validators.nodes[counter].cname);
     }
 
     if (this.config.publicNodes){
       for (let counter = 0; counter < this.config.publicNodes.nodes.length; counter++) {
-        this._copyTerraformFiles('publicNode', counter, this.config.publicNodes.nodes[counter].provider);
+        this._copyTerraformFiles(
+          'publicNode',
+          counter,
+          this.config.publicNodes.nodes[counter].provider,
+          this.config.validators.nodes[counter].cname);
       }
     }
   }
 
-  async _initNodes(type,nodes,){
-    for (let counter = 0; counter < nodes.length; counter++) {
-      const cwd = this._terraformNodeDirPath(type, counter);
-      const backendConfig = this._backendConfig(type, counter);
+  async _initNodes(type, nodes){
+    console.log(`_initNodes(type = ${type}, nodes.length = ${nodes.length})`)
+    for (let i = 0; i < nodes.length; i++) {
+      const cwd = this._terraformNodeDirPath(type, i);
       const options = { cwd };
-      await this._initCmd(backendConfig,options);
+      await this._initCmd(options, `tfstate/${nodes[i].cname}`);
     }
   }
 
-  _copyTerraformFiles(type, counter, provider) {
+  _copyTerraformFiles(type, counter, provider, cname = undefined) {
+    console.log(`_copyTerraformFiles(type = ${type}, counter = ${counter}, provider = ${provider})`)
     const targetDirPath = this._terraformNodeDirPath(type, counter);
+    console.log(`targetDirPath = ${targetDirPath}`)
     const originDirPath = path.join(this.terraformOriginPath, provider);
+    console.log(`originDirPath = ${originDirPath}`)
     fs.ensureDirSync(targetDirPath);
 
-    const nodeName = this._nodeName(type, counter);
+    const nodeName = cname
+      ? cname.split('.').join('-')
+      : this._nodeName(type, counter);
     const name = `${nodeName}-${this.config.project}`;
 
-    fs.readdirSync(originDirPath).forEach((item) => {
+    fs.readdirSync(originDirPath).filter(x => x.endsWith('.tf') || x.endsWith('.yml')).forEach((item) => {
       const origin = path.join(originDirPath, item);
       const target = path.join(targetDirPath, item);
       const data = {
@@ -210,23 +284,16 @@ class Terraform {
     });
   }
 
-  _terraformNodeDirPath(type, counter=0) {
-    const dirName = this._nodeName(type, counter);
+  _terraformNodeDirPath(type, counter = 0, cname = undefined) {
+    console.log(`_terraformNodeDirPath(type = ${type}, counter = ${counter})`)
+    const dirName = cname
+      ? cname.split('.').join('-')
+      : this._nodeName(type, counter);
     return path.join(this.terraformFilesPath, dirName);
   }
 
-  _backendConfig(type, counter) {
-    const bucket = this._bucketName();
-    const prefix = this._nodeName(type, counter);
-
-    return { bucket, prefix };
-  }
-
-  _bucketName() {
-    return `${this.config.project}-sv-tf-state`
-  }
-
   _nodeName(type, counter) {
+    console.log(`_nodeName(type = ${type}, counter = ${counter})`)
     const name = `${type}${counter}`;
     return name.toLowerCase();
   }
