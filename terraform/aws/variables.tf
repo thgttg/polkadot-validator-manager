@@ -1,6 +1,3 @@
-variable "project_id" {
-  type    = string
-}
 variable "location" {
   type    = string
 }
@@ -33,6 +30,12 @@ variable "domain" {
   type = string
 }
 variable "cname" {
+  type = string
+}
+variable "cloudflare_zone" {
+  type = string
+}
+variable "cloudflare_email" {
   type = string
 }
 variable "terraform_state_location" {

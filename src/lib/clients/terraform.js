@@ -114,6 +114,8 @@ class Terraform {
               `-var=image=${nodes[i].image}`,
               `-var=location=${nodes[i].location}`,
               `-var=machine_type=${nodes[i].machineType}`,
+              `-var=cloudflare_email=${nodes[i].cloudflare.email}`,
+              `-var=cloudflare_zone=${nodes[i].cloudflare.zone}`,
               `-var=terraform_state_location=${this.config.state.location}`,
               `-var=terraform_state_profile=${this.config.state.profile}`,
               /*
@@ -206,6 +208,8 @@ class Terraform {
       terraform_state_location: this.config.state.location,
       terraform_state_profile: this.config.state.profile,
       terraform_state_table: this.config.state.table,
+      cloudflare_email: node.cloudflare.email,
+      cloudflare_zone: node.cloudflare.zone,
       publicKey: sshKey,
       sshUser: node.sshUser,
       machineType: node.machineType,

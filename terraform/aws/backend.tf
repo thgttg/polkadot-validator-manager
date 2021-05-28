@@ -10,6 +10,10 @@ terraform {
       source = "hashicorp/aws"
       version = "~> 3.42"
     }
+    cloudflare = {
+      source = "cloudflare/cloudflare"
+      version = "~> 2.21"
+    }
   }
   backend "s3" {
     provider = aws.backend

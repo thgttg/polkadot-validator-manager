@@ -2,6 +2,8 @@ provider "aws" {
   profile = var.terraform_state_profile
   region = var.location
 }
+provider "cloudflare" {}
+
 resource "aws_key_pair" "key-{{ name }}" {
   key_name = "{{ name }}"
   public_key = var.public_key
@@ -115,6 +117,14 @@ resource "aws_instance" "main-{{ name }}" {
     "cname" = var.cname
   }
   user_data = data.template_file.userdata.rendered
+  iam_instance_profile = "${aws_iam_instance_profile.main-{{ name }}.name}"
+}
+resource "cloudflare_record" "main-{{ name }}" {
+  zone_id = var.cloudflare_zone
+  name = var.cname
+  value = "${aws_instance.main-{{ name }}.public_ip}"
+  type = "A"
+  ttl = 3600
 }
 resource "aws_cloudwatch_log_group" "cloud_init_output" {
   name = "${var.cname}_cloud-init-output"
@@ -146,4 +156,54 @@ data "template_file" "userdata" {
     log_group_nginx_access = aws_cloudwatch_log_group.nginx_access.name
     log_group_nginx_error = aws_cloudwatch_log_group.nginx_error.name
   }
+}
+resource "aws_iam_role" "main-{{ name }}" {
+  name = "polkadot-node-${var.hostname}"
+  description = "polkadot node role"
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "ec2.amazonaws.com",
+        }
+      }
+    ]
+  })
+}
+resource "aws_iam_instance_profile" "main-{{ name }}" {
+  name = "polkadot-node-${var.hostname}"
+  role = "${aws_iam_role.main-{{ name }}.id}"
+}
+resource "aws_iam_role_policy" "main-{{ name }}" {
+  name = "polkadot-node-${var.hostname}"
+  role = "${aws_iam_role.main-{{ name }}.id}"
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = [
+          "cloudwatch:PutMetricData",
+          "ec2:DescribeVolumes*",
+          "ec2:DescribeTags*",
+          "logs:PutLogEvents*",
+          "logs:DescribeLogStreams*",
+          "logs:DescribeLogGroups*",
+          "logs:CreateLogStream*",
+          "logs:CreateLogGroup*",
+        ]
+        Effect = "Allow"
+        Resource = "*"
+      },
+      {
+        Action = [
+          "ssm:GetParameter",
+        ]
+        Effect = "Allow"
+        Resource = "arn:aws:ssm:*:*:parameter/AmazonCloudWatch-*"
+      },
+    ]
+  })
 }
